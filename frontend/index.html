@@ -26,9 +26,14 @@
   .err{color:var(--bad);min-height:18px;font-size:12px}
   .pill{border:1px solid #444;padding:2px 6px;font-size:11px;color:var(--muted)}
   .ok{color:var(--ok)}.bad{color:var(--bad)}
-  .tabs{display:flex;gap:8px;margin-bottom:10px}
+  .tabs{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap}
   .tabs button{background:#000;border:1px solid #333;color:#aaa;padding:6px 8px;cursor:pointer}
   .tabs button.on{border-color:var(--accent);color:var(--accent)}
+  .green{color:var(--ok);font-weight:700}.red{color:var(--bad);font-weight:700}
+  .checks{display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;font-size:12px}
+  .checks div{border-bottom:1px solid #222;padding:4px 0}
+  .mono{font-family:Consolas,monospace;font-size:11px;color:var(--muted);word-break:break-all}
+  select{background:#000;border:1px solid #444;color:#fff;padding:8px;width:100%;margin:6px 0 10px;font-family:Consolas,monospace}
 </style>
 </head>
 <body>
@@ -53,7 +58,16 @@ createApp({
     const username=ref('admin'), password=ref('123456'), err=ref(''), actionErr=ref('');
     const leftTab=ref(0), rightTab=ref(0);
     const versions=ref([]), mappings=ref([]), formal=ref([]), conflicts=ref([]);
+    const cert=ref(null), gateRows=ref([]);
     const oldKey=ref('OLD-B1');
+    const cutTarget=ref(''), cutAt=ref(''), cutErr=ref(''), cutOk=ref('');
+    const CHECK_LABELS={
+      atomic_single_open_ok:'原子单窗：开窗数≤1',
+      no_unbounded_dual_active:'双窗口径：无无界双生效',
+      boundary_continuity_ok:'生效窗边界连续性',
+      cross_validation_ok:'互证卡：窗内无静默分叉',
+      every_formal_traceable_to_window:'正式区每笔可回指命中窗',
+      rejected_zero_formal_growth:'拒收笔正式零增'};
     function auth(){return {Authorization:'Bearer '+token.value,'Content-Type':'application/json'};}
     async function login(){
       err.value='';
@@ -80,6 +94,26 @@ createApp({
       formal.value=Array.isArray(f.items)?f.items:[];
       const c=await loadJson('/api/conflicts'); if(c===null) return;
       conflicts.value=Array.isArray(c.items)?c.items:[];
+      const g=await loadJson('/api/gate-decisions'); if(g===null) return;
+      gateRows.value=Array.isArray(g.items)?g.items:[];
+      const k=await loadJson('/api/certification'); if(k===null) return;
+      cert.value=k;
+      if(!cutTarget.value){
+        const pending=versions.value.find(v=>v.status==='待切版');
+        if(pending) cutTarget.value=pending.version;
+      }
+    }
+    async function doCutover(){
+      cutErr.value=''; cutOk.value='';
+      const body={to_version:cutTarget.value};
+      if(cutAt.value) body.effective_at=new Date(cutAt.value).toISOString();
+      const r=await fetch('/api/cutover',{method:'POST',headers:auth(),body:JSON.stringify(body)});
+      const j=await r.json();
+      if(!r.ok){cutErr.value=j.detail||'切版失败';return;}
+      cutOk.value='cut_id '+j.cut_id+' 已物化：新窗 #'+j.new_window_id+
+        (j.closed_window_ids.length?('，关闭旧窗 '+j.closed_window_ids.join(',')):'，有界重叠 '+j.overlap_seconds+'s');
+      cutAt.value='';
+      await refresh();
     }
     async function doRemap(){
       actionErr.value='';
@@ -88,7 +122,9 @@ createApp({
       await refresh();
     }
     onMounted(()=>{if(token.value)refresh();});
-    return {token,user,username,password,err,actionErr,leftTab,rightTab,versions,mappings,formal,conflicts,oldKey,login,logout,doRemap};
+    return {token,user,username,password,err,actionErr,leftTab,rightTab,versions,mappings,
+      formal,conflicts,cert,gateRows,oldKey,login,logout,doRemap,refresh,
+      cutTarget,cutAt,cutErr,cutOk,doCutover,CHECK_LABELS};
   },
   template:`
   <div v-if="!token" class="login">
@@ -107,11 +143,16 @@ createApp({
         <div class="tabs">
           <button :class="{on:leftTab===0}" @click="leftTab=0">映射版本</button>
           <button :class="{on:leftTab===1}" @click="leftTab=1">执行重映</button>
+          <button :class="{on:leftTab===2}" @click="leftTab=2">切版操作</button>
         </div>
         <div class="box" v-show="leftTab===0">
-          <h2>Map Versions</h2>
-          <table><thead><tr><th>version</th><th>status</th><th>from</th></tr></thead>
-          <tbody><tr v-for="v in versions" :key="v.id"><td>{{v.version}}</td><td>{{v.status}}</td><td>{{v.effective_from}}</td></tr></tbody></table>
+          <h2>Map Versions <span class="pill">status 由生效窗派生</span></h2>
+          <table><thead><tr><th>version</th><th>status</th><th>win#</th><th>window to</th></tr></thead>
+            <tbody><tr v-for="v in versions" :key="v.id">
+              <td>{{v.version}}</td>
+              <td :class="v.status==='生效'?'green':''">{{v.status}}</td>
+              <td>{{v.window_id||'-'}}</td>
+              <td class="mono">{{v.window_to||'∞'}}</td></tr></tbody></table>
           <h2 style="margin-top:14px">Mappings</h2>
           <table><thead><tr><th>old</th><th>new</th><th>kind</th></tr></thead>
           <tbody><tr v-for="m in mappings" :key="m.id"><td>{{m.old_key}}</td><td class="ok">{{m.new_key}}</td><td>{{m.kind}}</td></tr></tbody></table>
@@ -123,12 +164,26 @@ createApp({
           <button class="primary" @click="doRemap">重映入正式区</button>
           <div class="err">{{actionErr}}</div>
         </div>
+        <div class="box" v-show="leftTab===2">
+          <h2>Version Cutover <span class="pill">生效窗物化</span></h2>
+          <label>目标版本（须已在映射册登记）</label>
+          <select v-model="cutTarget">
+            <option v-for="v in versions" :key="v.id" :value="v.version">{{v.version}} — {{v.status}}</option>
+          </select>
+          <label>生效时刻（留空＝当前 UTC；双窗口径可填过去/未来时刻）</label>
+          <input type="datetime-local" v-model="cutAt"/>
+          <button class="primary" @click="doCutover">执行切版（写生效窗登记表）</button>
+          <div class="err">{{cutErr}}</div>
+          <div class="green" style="font-size:12px;min-height:18px">{{cutOk}}</div>
+          <div class="mono" style="margin-top:8px">原子口径：同事务关旧窗+开新窗，失败整体回滚；双窗口径：旧窗物化计划收口点，重叠有界。</div>
+        </div>
       </div>
       <div class="bridge"></div>
       <div class="pane">
         <div class="tabs">
           <button :class="{on:rightTab===0}" @click="rightTab=0">正式区</button>
           <button :class="{on:rightTab===1}" @click="rightTab=1">冲突队列</button>
+          <button :class="{on:rightTab===2}" @click="rightTab=2">切版审计</button>
         </div>
         <div class="box" v-show="rightTab===0">
           <h2>Formal Zone</h2>
@@ -139,6 +194,53 @@ createApp({
           <h2>Conflicts</h2>
           <table><thead><tr><th>old</th><th>reason</th><th>status</th></tr></thead>
           <tbody><tr v-for="c in conflicts" :key="c.id"><td class="bad">{{c.old_key}}</td><td>{{c.reason}}</td><td>{{c.status}}</td></tr></tbody></table>
+        </div>
+        <div class="box" v-show="rightTab===2">
+          <h2>Cutover Certification
+            <span class="pill">口径 {{cert?cert.mode:'-'}}</span>
+            <span :class="cert&&cert.checks.all_green?'green':'red'">
+              {{cert?(cert.checks.all_green?'全绿核证':'红灯违例'):'加载中'}}</span>
+          </h2>
+          <div v-if="cert" class="checks">
+            <div v-for="(v,k) in CHECK_LABELS" :key="k">
+              <span :class="cert.checks[k]?'green':'red'">{{cert.checks[k]?'✓':'✗'}}</span> {{v}}
+            </div>
+          </div>
+          <h2 style="margin-top:14px">生效窗登记表（物化边界）</h2>
+          <table v-if="cert"><thead><tr><th>win#</th><th>version</th><th>from</th><th>to</th><th>cut_id</th></tr></thead>
+            <tbody><tr v-for="b in cert.boundaries" :key="b.id">
+              <td>{{b.id}}</td><td>{{b.version}}</td>
+              <td class="mono">{{b.effective_from}}</td>
+              <td class="mono">{{b.effective_to||'∞ 开窗'}}</td><td>{{b.cut_id||'-'}}</td></tr></tbody></table>
+          <h2 style="margin-top:14px">切版台账</h2>
+          <table v-if="cert"><thead><tr><th>cut#</th><th>to</th><th>关旧</th><th>重叠s</th><th>结果</th></tr></thead>
+            <tbody><tr v-for="a in cert.cut_audit" :key="a.cut_id">
+              <td>{{a.cut_id}}</td><td>{{a.to_version}}</td><td>{{a.close_old?'是':'否'}}</td>
+              <td>{{a.overlap_seconds===null?'-':a.overlap_seconds}}</td>
+              <td :class="a.result==='committed'?'green':'red'">{{a.result}}</td></tr></tbody></table>
+          <div v-if="cert&&cert.overlap_violations.length" style="margin-top:10px">
+            <div class="red">无界双生效违例：</div>
+            <div class="mono" v-for="(v,i) in cert.overlap_violations" :key="i">{{v.reason}} {{v.versions.join(' / ')}}</div>
+          </div>
+          <h2 style="margin-top:14px">互证卡（窗内静默分叉）</h2>
+          <div v-if="cert">
+            <div v-if="!cert.cross_validation_card.length" class="green">✓ 无窗内分叉</div>
+            <table v-else><thead><tr><th>old</th><th>win#</th><th>new keys</th></tr></thead>
+              <tbody><tr v-for="x in cert.cross_validation_card" :key="x.mapped_from+x.window_id">
+                <td class="red">{{x.mapped_from}}</td><td>{{x.window_id}}</td><td>{{x.new_keys}}</td></tr></tbody></table>
+            <div v-if="cert.boundary_changes.length" style="margin-top:8px">
+              <div class="pill" style="display:inline-block">跨边界换键（可核证，非故障）</div>
+              <div class="mono" v-for="x in cert.boundary_changes" :key="x.mapped_from">
+                {{x.mapped_from}} → {{x.new_keys}} 跨版 {{x.versions}}</div>
+            </div>
+          </div>
+          <h2 style="margin-top:14px">重映闸流水（window_hit 快照）</h2>
+          <table><thead><tr><th>#</th><th>old</th><th>命中版</th><th>判定</th><th>formal#</th></tr></thead>
+            <tbody><tr v-for="g in gateRows" :key="g.decision_id">
+              <td>{{g.decision_id}}</td><td>{{g.old_key}}</td>
+              <td>{{g.hit_version||'-'}}</td>
+              <td :class="g.decision==='accept'?'green':'red'">{{g.decision}}</td>
+              <td>{{g.formal_id||'零增'}}</td></tr></tbody></table>
         </div>
       </div>
     </div>

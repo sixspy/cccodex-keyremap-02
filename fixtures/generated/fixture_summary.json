@@ -1,0 +1,80 @@
+{
+  "atomic_cutover.db": {
+    "cut": {
+      "cut_id": 1,
+      "mode": "atomic",
+      "to_version": "m-2026.12",
+      "effective_at": "2026-11-15T00:00:00+00:00",
+      "new_window_id": 2,
+      "closed_window_ids": [
+        1
+      ],
+      "overlap_seconds": 0
+    },
+    "post_cut_remap": {
+      "entity_key": "NEW-900",
+      "version": "m-2026.12",
+      "window_id": 2,
+      "decision_id": 2,
+      "formal_id": 2,
+      "window_hit": "{\"cut_id\": 1, \"effective_from\": \"2026-11-15T00:00:00+00:00\", \"effective_to\": null, \"opened_event\": \"cutover_open\", \"version\": \"m-2026.12\", \"window_id\": 2}"
+    },
+    "open_windows": 1,
+    "all_green": true
+  },
+  "dual_window.db": {
+    "cut": {
+      "cut_id": 1,
+      "mode": "dual",
+      "to_version": "m-2026.12",
+      "effective_at": "2026-11-15T00:00:00+00:00",
+      "new_window_id": 2,
+      "closed_window_ids": [],
+      "overlap_seconds": 3600
+    },
+    "before_cut_hit": {
+      "entity_key": "NEW-100",
+      "version": "m-2026.11",
+      "window_id": 1,
+      "decision_id": 1,
+      "formal_id": 1,
+      "window_hit": "{\"cut_id\": null, \"effective_from\": \"2026-11-14T23:30:00+00:00\", \"effective_to\": \"2026-11-15T01:00:00.000000+00:00\", \"opened_event\": \"seed\", \"version\": \"m-2026.11\", \"window_id\": 1}"
+    },
+    "at_cut_hit": {
+      "entity_key": "NEW-900",
+      "version": "m-2026.12",
+      "window_id": 2,
+      "decision_id": 2,
+      "formal_id": 2,
+      "window_hit": "{\"cut_id\": 1, \"effective_from\": \"2026-11-15T00:00:00+00:00\", \"effective_to\": null, \"opened_event\": \"cutover_open\", \"version\": \"m-2026.12\", \"window_id\": 2}"
+    },
+    "gate_decisions": [
+      {
+        "decision_id": 1,
+        "old_key": "OLD-A1",
+        "hit_version": "m-2026.11",
+        "window_hit": "{\"cut_id\": null, \"effective_from\": \"2026-11-14T23:30:00+00:00\", \"effective_to\": \"2026-11-15T01:00:00.000000+00:00\", \"opened_event\": \"seed\", \"version\": \"m-2026.11\", \"window_id\": 1}",
+        "decision": "accept",
+        "formal_id": 1
+      },
+      {
+        "decision_id": 2,
+        "old_key": "OLD-A1",
+        "hit_version": "m-2026.12",
+        "window_hit": "{\"cut_id\": 1, \"effective_from\": \"2026-11-15T00:00:00+00:00\", \"effective_to\": null, \"opened_event\": \"cutover_open\", \"version\": \"m-2026.12\", \"window_id\": 2}",
+        "decision": "accept",
+        "formal_id": 2
+      },
+      {
+        "decision_id": 3,
+        "old_key": "OLD-GHOST",
+        "hit_version": "m-2026.12",
+        "window_hit": "{\"cut_id\": 1, \"effective_from\": \"2026-11-15T00:00:00+00:00\", \"effective_to\": null, \"opened_event\": \"cutover_open\", \"version\": \"m-2026.12\", \"window_id\": 2}",
+        "decision": "reject",
+        "formal_id": null
+      }
+    ],
+    "all_green": true,
+    "overlap_violations": []
+  }
+}
